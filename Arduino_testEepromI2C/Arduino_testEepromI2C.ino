@@ -1,104 +1,108 @@
-/*
- * \brief Check consistency of I2C EEPROM
- *
- * It will write test values in the entire EEPROM and try to read them.
- * All errors will be displayed.
- *
- * \author Quentin Comte-Gaz <quentin@comte-gaz.com>
- * \date 29 June 2016
- * \license MIT License (contact me if too restrictive)
- * \copyright Copyright (c) 2016 Quentin Comte-Gaz
+/**************************************************************************//**
+ * \brief EEPROM 24C01 / 24C02 library for Arduino - Demonstration program
+ * \author Copyright (C) 2012  Julien Le Sech - www.idreammicro.com
  * \version 1.0
- */
+ * \date 20120217
+ *
+ * This file is part of the EEPROM 24C01 / 24C02 library for Arduino.
+ *
+ * This library is free software: you can redistribute it and/or modify it under
+ * the terms of the GNU Lesser General Public License as published by the Free
+ * Software Foundation, either version 3 of the License, or (at your option) any
+ * later version.
+ * 
+ * This library is distributed in the hope that it will be useful, but WITHOUT
+ * ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or FITNESS
+ * FOR A PARTICULAR PURPOSE. See the GNU Lesser General Public License for more
+ * details.
+ *
+ * You should have received a copy of the GNU Lesser General Public License
+ * along with this program. If not, see http://www.gnu.org/licenses/
+ ******************************************************************************/
 
-#include <I2CEEPROM.h>
+/**************************************************************************//**
+ * \file WriteReadBytes.ino
+ ******************************************************************************/
+ 
+/******************************************************************************
+ * Header file inclusions.
+ ******************************************************************************/
 
-#define CHIP_ADDRESS 0x50 // Address of EEPROM chip (24LC256->0x50)
-#define EEPROM_BYTES 32768 // Number of bytes in EEPROM chip
+#include <Wire.h>
 
-I2CEEPROM i2c_eeprom(CHIP_ADDRESS); // Create I2C EEPROM instance
+#include <Eeprom24C01_02.h>
 
-void setup(void)
+/******************************************************************************
+ * Private macro definitions.
+ ******************************************************************************/
+
+/**************************************************************************//**
+ * \def EEPROM_ADDRESS
+ * \brief Address of EEPROM memory on TWI bus.
+ ******************************************************************************/
+#define EEPROM_ADDRESS 0x50
+
+/******************************************************************************
+ * Private variable definitions.
+ ******************************************************************************/
+
+static Eeprom24C01_02 eeprom(EEPROM_ADDRESS);
+
+/******************************************************************************
+ * Public function definitions.
+ ******************************************************************************/
+
+/**************************************************************************//**
+ * \fn void setup()
+ *
+ * \brief
+ ******************************************************************************/
+void setup()
 {
-  Serial.begin(9600);
+    // Initialize serial communication.
+    Serial.begin(9600);
+    
+    // Initiliaze EEPROM library.
+    eeprom.initialize();
 
-  // Variables
-  Serial.print("CHIP_ADDRESS=0x");
-  Serial.print(CHIP_ADDRESS, HEX);
-  Serial.print("\n");
+    const byte address = 0;
+    const byte count = 1000;
 
-  Serial.print("EEPROM_BYTES=");
-  Serial.print(EEPROM_BYTES, DEC);
-  Serial.print("\n\n");
+    // Declare byte arrays.
+    byte inputBytes[count] = { 0 };
+    byte outputBytes[count] = { 0 };
 
-  Serial.print("This test will: \n -Write all the EEPROM\n -Read all the EEPROM and check consistency\n\n");
-  // For even more extended test, you may write values ("writeTest()"), reboot and read values ("readTest()")
-  // This would ensure that the EEPROM is holding values even after a reboot.
+    // Fill input array with printable characters. See ASCII table for more
+    // details.
+    for (byte i = 0; i < count; i++)
+    {    
+        inputBytes[i] = i + 33;
+    }
 
-  Serial.print("Beginning EEPROM check-up...\n");
+    // Write input array to EEPROM memory.
+    Serial.println("Write bytes to EEPROM memory...");
+    eeprom.writeBytes(address, count, inputBytes);
 
-  writeTest();
-  readTest();
-
-  Serial.print("EEPROM check-up done\n");
+    // Read array with bytes read from EEPROM memory.
+    Serial.println("Read bytes from EEPROM memory...");
+    eeprom.readBytes(address, count, outputBytes);
+    
+    // Print read bytes.
+    Serial.println("Read bytes:");
+    for (byte i = 0; i < count; i++)
+    {
+        Serial.write(outputBytes[i]);
+        Serial.print(" ");
+    }
+    Serial.println("");
 }
 
+/**************************************************************************//**
+ * \fn void loop()
+ *
+ * \brief
+ ******************************************************************************/
 void loop()
 {
-}
 
-/*!
- * \brief Write all bytes in I2C EEPROM for test scenario
- */
-void writeTest(void)
-{
-  Serial.print("Writing test values in EEPROM...\n");
-  for (unsigned int address = 0; address < EEPROM_BYTES; address++) {
-    i2c_eeprom.write(address, address/1024);
-
-    if ((address%1024) == 0) {
-      Serial.print(address, DEC);
-      Serial.print("/");
-      Serial.print(EEPROM_BYTES, DEC);
-      Serial.print(" bytes done\n");
-    }
-  }
-}
-
-/*!
- * \brief Try to read all bytes in I2C EEPROM from test scenario
- */
-void readTest()
-{
-  unsigned int errors = 0;
-  unsigned int data = 0;
-
-  Serial.print("Reading the EEPROM and check consistency\n");
-
-  for (unsigned int address = 0; address < EEPROM_BYTES; address++) {
-    data = i2c_eeprom.read(address);
-
-    if (data != address/1024) {
-      errors++;
-      Serial.print("Error on address ");
-      Serial.print(address, HEX);
-      Serial.print(" : data in EEPROM is ");
-      Serial.print(data, HEX);
-      Serial.print(" while it should be ");
-      Serial.print(address/1024, DEC);
-      Serial.print("\n");
-    }
-
-    if ((address%1024) == 0) {
-      Serial.print(address, DEC);
-      Serial.print("/");
-      Serial.print(EEPROM_BYTES, DEC);
-      Serial.print(" bytes done\n");
-    }
-  }
-
-  Serial.print("All EEPROM read\n");
-  Serial.print("Number of errors: ");
-  Serial.print(errors);
-  Serial.print("\n");
 }
