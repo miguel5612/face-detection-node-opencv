@@ -1,7 +1,7 @@
 #include <SoftwareSerial.h>
 #include <SPI.h>
+#include <Wire.h>
 #include <MFRC522.h>
-#include <Adafruit_CCS811.h>
 #include <TinyGPS.h>
 #include "SparkFunCCS811.h"
 #include "DHT.h"
@@ -10,6 +10,7 @@
 #define DHTPIN_EXT 8
 #define DHTTYPE DHT11
 
+#define intPin 4
 #define timeDelay 50
 #define baudRateGPS 9600
 #define gpsTxPin  8
@@ -18,14 +19,19 @@
 #define SS_PIN  10   //Pin 10 para el SS (SDA) del RC522
 #define ledStatus 13
 #define CCS811_ADDR 0x5A //Alternate I2C Address
+#define sep ','
+#define spaceId 10 //espacio entre la informacion comun y la id del usuario (recomendado menor a 256
 
 static void smartdelay(unsigned long ms);
 unsigned long age, date, time, chars = 0;
 unsigned short sentences = 0, failed = 0;
 float flat, flon,alt,h1,h2,t1,t2;
 boolean statusFlag, ledFlag;
+int tvoc,co2;
+char* id ;
 
-TinyGPS gps;
+
+TinyGPS gps;  
 SoftwareSerial gpsSerial(gpsTxPin, gpsRxPin);
 MFRC522 mfrc522(SS_PIN, RST_PIN); //Creamos el objeto para el RC522
 DHT dht_int(DHTPIN_INT, DHTTYPE);
@@ -39,6 +45,8 @@ void setup() {
   SPI.begin();        //Iniciamos el Bus SPI
   mfrc522.PCD_Init(); // Iniciamos  el MFRC522
   pinMode(ledStatus,OUTPUT);
+  pinMode(intPin,OUTPUT);
+  digitalWrite(intPin,LOW);
   //This begins the CCS811 sensor and prints error status of .begin()
   CCS811Core::status returnCode = myCCS811.begin();
   Serial.print("begin exited with: ");
@@ -46,12 +54,13 @@ void setup() {
   Serial.println();
   dht_int.begin();
   dht_ext.begin();
-}
+} 
 
 void loop() {
   // Revisamos si hay nuevas tarjetas  presentes
   if ( mfrc522.PICC_IsNewCardPresent()) 
         {  
+          id = "";
       //Seleccionamos una tarjeta
             if ( mfrc522.PICC_ReadCardSerial()) 
             {
@@ -59,25 +68,43 @@ void loop() {
                   Serial.print("Card UID:");
                   for (byte i = 0; i < mfrc522.uid.size; i++) {
                           Serial.print(mfrc522.uid.uidByte[i] < 0x10 ? " 0" : " ");
-                          Serial.print(mfrc522.uid.uidByte[i], HEX);   
+                          Serial.print(mfrc522.uid.uidByte[i], HEX);  
+                          id[i] = mfrc522.uid.uidByte[i];        
                   }
+                  writeEEPROM(0x51, id);
                   if (myCCS811.dataAvailable())
                   {
                     myCCS811.readAlgorithmResults();
                     
-                    float h1 = dht_int.readHumidity();
-                    float t1 = dht_int.readTemperature();
-                    float h2 = dht_ext.readHumidity();
-                    float t2 = dht_ext.readTemperature();
+                    h1 = dht_int.readHumidity();
+                    t1 = dht_int.readTemperature();
+                    h2 = dht_ext.readHumidity();
+                    t2 = dht_ext.readTemperature();
+                    
+                    printRunTime();
+                    tvoc = myCCS811.getTVOC();
+                    co2 = myCCS811.getCO2();
                     readGPS();
+                    saveEepromI2C();
+                    sendInt();
+                    publishSerial();
+                    readI2C();
+                  } 
+                  // Terminamos la lectura de la tarjeta  actual
+                  mfrc522.PICC_HaltA();         
+            }      
+  } 
+  
+}
+void publishSerial(){
+  
                     Serial.print("CO2[");
-                    Serial.print(myCCS811.getCO2());
+                    Serial.print(co2);
                     Serial.print("] tVOC[");
-                    Serial.print(myCCS811.getTVOC());
+                    Serial.print(tvoc);
                     Serial.print("] millis[");
                     Serial.print(millis());
                     Serial.print("] ");
-                    printRunTime();
                     Serial.print(" ");
                     Serial.print(" T = ");
                     Serial.print(t1);
@@ -98,15 +125,77 @@ void loop() {
                     
                     Serial.print("LON = ");
                     Serial.print(flon);
-                    Serial.print(" ");
+                    Serial.print("ID =  ");
+                    Serial.println(id);
                     Serial.println();
-                  } 
-                  Serial.println();
-                  // Terminamos la lectura de la tarjeta  actual
-                  mfrc522.PICC_HaltA();         
-            }      
-  } 
 }
+void sendInt(){
+  
+                    digitalWrite(intPin,HIGH);
+                    delay(200);
+                    digitalWrite(intPin,LOW);
+                  
+}
+void writeEEPROM(long eeAddress, byte data)
+{
+  if (eeAddress < 65536)
+  {
+    Wire.beginTransmission(EEPROM_ADR_LOW_BLOCK);
+    eeAddress &= 0xFFFF; //Erase the first 16 bits of the long variable
+  }
+  else
+  {
+    Wire.beginTransmission(EEPROM_ADR_HIGH_BLOCK);
+  }
+
+  Wire.write((int)(eeAddress >> 8)); // MSB
+  Wire.write((int)(eeAddress & 0xFF)); // LSB
+  Wire.write(data);
+  Wire.endTransmission();
+}
+void readI2C(){
+  for(int i = 0; i < 10; i++) {
+    byte r = eeprom_i2c_read(0x50, i);
+    Serial.print(i);
+    Serial.print(" - ");
+    Serial.print(r);
+    Serial.print("\n");
+    delay(500);
+    
+    byte r2 = eeprom_i2c_read(0x50, spaceId + (i));
+    Serial.print(i);
+    Serial.print(" - ");
+    Serial.print(r2 < 0x10 ? " 0" : " ");
+    Serial.print(r2, HEX);  
+    Serial.print("\n");
+    delay(500);
+  }
+}
+void saveEepromI2C(){
+                    /*  
+                    for(int i = 0; i < 10; i++) {
+                      eeprom_i2c_write(0x51, i, id[i]);
+                      delay(100);
+                    }
+                    */
+                    eeprom_i2c_write(B01010000, 1, flat);
+                    delay(100);
+                    eeprom_i2c_write(B01010000, 2, flon);
+                    delay(100);
+                    eeprom_i2c_write(B01010000, 3, co2);
+                    delay(100);
+                    eeprom_i2c_write(B01010000, 4, tvoc);
+                    delay(100);
+                    eeprom_i2c_write(B01010000, 5, t1);
+                    delay(100);
+                    eeprom_i2c_write(B01010000, 6, t2);
+                    delay(100);
+                    eeprom_i2c_write(B01010000, 7, h1);
+                    delay(100);
+                    eeprom_i2c_write(B01010000, 8, h2);
+                    delay(100);
+}
+
 void readGPS(){
   sentences = 0, failed = 0;chars = 0;
   gps.f_get_position(&flat, &flon, &age);
@@ -196,4 +285,23 @@ void printRunTime()
     if (error & 1 << 0) Serial.print("MsgInvalid");
     Serial.println();
   }
+}
+
+void eeprom_i2c_write(byte address, byte from_addr, byte data) {
+  Wire.beginTransmission(address);
+  Wire.write(from_addr);
+  Wire.write(data);
+  Wire.endTransmission();
+}
+
+byte eeprom_i2c_read(int address, int from_addr) {
+  Wire.beginTransmission(address);
+  Wire.write(from_addr);
+  Wire.endTransmission();
+
+  Wire.requestFrom(address, 1);
+  if(Wire.available())
+    return Wire.read();
+  else
+    return 0xFF;
 }
